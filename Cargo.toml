@@ -1,0 +1,23 @@
+[package]
+name = "sleep_sound_full"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.skyline]
+titleid = "01006A800016E000"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+skyline = { git = "https://github.com/ultimate-research/skyline-rs" }
+# Smashline 2 (matches libsmashline_plugin.nro). It re-exports skyline_smash,
+# so this plugin uses that copy to avoid type mismatches.
+smashline = { git = "https://github.com/HDR-Development/smashline" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true

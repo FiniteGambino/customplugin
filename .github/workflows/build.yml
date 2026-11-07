@@ -1,0 +1,36 @@
+name: Build plugin
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rustup + cargo-skyline
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo install --git https://github.com/jam1garner/cargo-skyline cargo-skyline --locked
+      - name: Install Skyline std
+        run: cargo skyline update-std
+      - name: Build
+        run: cargo skyline build --release
+      - name: Collect plugin
+        run: |
+          mkdir -p dist
+          cp target/aarch64-skyline-switch/release/libsleep_sound_full.nro dist/plugin.nro
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: dist/plugin.nro
+      - name: Commit built plugin
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -f dist/plugin.nro
+          git commit -m "Built plugin.nro [skip ci]" || echo "nothing to commit"
+          git push
