@@ -9,7 +9,7 @@
 //! clip plays. It covers every source of sleep (Sing, Snooze, Peach/Daisy
 //! Blossom, Darkrai, etc.) because it hooks the victim's sleep status.
 
-use smashline::skyline_smash::app::{enSEType, lua_bind::SoundModule, sv_animcmd};
+use smashline::skyline_smash::app::{enSEType, lua_bind::SoundModule, sv_animcmd, sv_system};
 use smashline::{Agent, Hash40, L2CAgentBase, L2CValue, Priority};
 
 /// Fighters whose vanilla `sound_sleepstart` is only
@@ -48,12 +48,20 @@ unsafe fn play_se(agent: &mut L2CAgentBase, name: &str) {
 
 /// Playback volume for the sleep sound. 1.0 = normal. Other mods use 1.3-1.75;
 /// raise this to make it louder, lower it if it distorts.
-const VOLUME: f32 = 2.5;
+/// Starts at 1.75, the highest value other mods are known to use.
+const VOLUME: f32 = 1.75;
 
-/// Plays se_common_sleep through the SoundModule and sets its volume on the
-/// returned handle (the same approach other Smash mods use to boost a sound).
+/// Plays se_common_sleep and boosts its volume.
+///
+/// The fighter's module accessor comes from the game's own lookup (not from a
+/// struct field, whose layout can differ between game versions). If anything
+/// looks wrong we fall back to the plain PLAY_SE that is known to work.
 unsafe fn play_sleep(agent: &mut L2CAgentBase) {
-    let module_accessor = agent.module_accessor;
+    let module_accessor: *mut _ = sv_system::battle_object_module_accessor(agent.lua_state_agent);
+    if module_accessor.is_null() {
+        play_se(agent, "se_common_sleep");
+        return;
+    }
     let handle = SoundModule::play_se(
         module_accessor,
         Hash40::new("se_common_sleep"),
@@ -63,7 +71,9 @@ unsafe fn play_sleep(agent: &mut L2CAgentBase) {
         false,
         enSEType(0),
     );
-    SoundModule::set_se_vol(module_accessor, handle as i32, VOLUME, 0);
+    if handle != 0 {
+        SoundModule::set_se_vol(module_accessor, handle as i32, VOLUME, 0);
+    }
 }
 
 unsafe extern "C" fn sound_sleepstart(agent: &mut L2CAgentBase) {
