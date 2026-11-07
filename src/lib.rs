@@ -9,6 +9,9 @@
 //! clip plays. It covers every source of sleep (Sing, Snooze, Peach/Daisy
 //! Blossom, Darkrai, etc.) because it hooks the victim's sleep status.
 
+use std::io::Write;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use smashline::skyline_smash::app::{enSEType, lua_bind::SoundModule, sv_animcmd, sv_system};
 use smashline::{Agent, Hash40, L2CAgentBase, L2CValue, Priority};
 
@@ -30,6 +33,22 @@ const FIGHTERS: &[&str] = &[
     "tantan", "toonlink", "trail", "wario", "wiifit", "wolf", "yoshi",
     "younglink", "zelda",
 ];
+
+/// Debug recorder: appends a line to sd:/sleep_sound_debug.txt (first 120 lines only).
+static TRACES: AtomicUsize = AtomicUsize::new(0);
+fn trace(msg: &str) {
+    if TRACES.fetch_add(1, Ordering::Relaxed) > 120 {
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("sd:/sleep_sound_debug.txt")
+    {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
 
 /// Same as smash_script's `is_excute`.
 unsafe fn is_excute(agent: &mut L2CAgentBase) -> bool {
@@ -57,11 +76,15 @@ const VOLUME: f32 = 1.75;
 /// struct field, whose layout can differ between game versions). If anything
 /// looks wrong we fall back to the plain PLAY_SE that is known to work.
 unsafe fn play_sleep(agent: &mut L2CAgentBase) {
+    trace("play_sleep: start");
     let module_accessor: *mut _ = sv_system::battle_object_module_accessor(agent.lua_state_agent);
+    trace(&format!("play_sleep: module_accessor = {:p}", module_accessor));
     if module_accessor.is_null() {
+        trace("play_sleep: null accessor, falling back to PLAY_SE");
         play_se(agent, "se_common_sleep");
         return;
     }
+    trace("play_sleep: calling SoundModule::play_se");
     let handle = SoundModule::play_se(
         module_accessor,
         Hash40::new("se_common_sleep"),
@@ -71,15 +94,22 @@ unsafe fn play_sleep(agent: &mut L2CAgentBase) {
         false,
         enSEType(0),
     );
+    trace(&format!("play_sleep: play_se returned handle = {:#x}", handle));
     if handle != 0 {
+        trace("play_sleep: calling set_se_vol");
         SoundModule::set_se_vol(module_accessor, handle as i32, VOLUME, 0);
+        trace("play_sleep: set_se_vol done");
     }
 }
 
 unsafe extern "C" fn sound_sleepstart(agent: &mut L2CAgentBase) {
-    if is_excute(agent) {
+    trace("sound_sleepstart: called");
+    let go = is_excute(agent);
+    trace(&format!("sound_sleepstart: is_excute = {}", go));
+    if go {
         play_sleep(agent);
     }
+    trace("sound_sleepstart: finished");
 }
 
 /// Steve's vanilla script also plays a wood sound on frame 12; keep it.
@@ -95,6 +125,11 @@ unsafe extern "C" fn sound_sleepstart_pickel(agent: &mut L2CAgentBase) {
 
 #[skyline::main(name = "sleep_sound_full")]
 pub fn main() {
+    // Write any panic message to the debug file (the default handler's message is lost).
+    std::panic::set_hook(Box::new(|info| {
+        trace(&format!("PANIC: {}", info));
+    }));
+    trace("plugin loaded");
     for name in FIGHTERS {
         Agent::new(*name)
             .acmd("sound_sleepstart", sound_sleepstart, Priority::Low)
