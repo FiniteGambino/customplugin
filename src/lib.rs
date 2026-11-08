@@ -58,8 +58,8 @@ unsafe fn play_se(agent: &mut L2CAgentBase, name: &str) {
 
 /// Playback volume for the sleep sound. 1.0 = normal. Other mods use 1.3-1.75;
 /// raise this to make it louder, lower it if it distorts.
-/// 1.75 tested stable on 2026-11-08 but too quiet; 2.5 is about +8 dB.
-const VOLUME: f32 = 2.5;
+/// 1.75 tested stable on 2026-11-08 but too quiet; 2.5 is about +8 dB, 3.5 about +11 dB.
+const VOLUME: f32 = 3.5;
 
 /// Plays se_common_sleep and boosts its volume.
 ///
