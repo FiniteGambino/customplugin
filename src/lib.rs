@@ -9,8 +9,13 @@
 //! clip plays. It covers every source of sleep (Sing, Snooze, Peach/Daisy
 //! Blossom, Darkrai, etc.) because it hooks the victim's sleep status.
 
-use smashline::skyline_smash::app::{enSEType, lua_bind::SoundModule, sv_animcmd, sv_system};
-use smashline::{Agent, Hash40, L2CAgentBase, L2CValue, Priority};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use smashline::skyline_smash::app::{
+    enSEType, lua_bind::{SoundModule, WorkModule}, sv_animcmd, sv_system, utility,
+    BattleObjectModuleAccessor,
+};
+use smashline::{Agent, ExecStop, Hash40, L2CAgentBase, L2CFighterCommon, L2CValue, Main, Priority};
 
 /// Fighters whose vanilla `sound_sleepstart` is only
 /// `PLAY_STATUS(se_common_sleep)` (checked against WuBoytH/SSBU-Dumped-Scripts).
@@ -106,14 +111,75 @@ unsafe extern "C" fn sound_sleepstart_pickel(agent: &mut L2CAgentBase) {
     agent.clear_lua_stack();
 }
 
+// ---------------------------------------------------------------------------
+// Louder shield break and final-stock hit
+//
+// se_common_guardbreak (shield breaks) and se_common_finishhit (the red-screen
+// final hit) are started by the game's own code, not by a fighter script, so
+// they can't be replaced like the sleep sound. Instead, every frame we look at
+// each fighter: the moment one of these sounds starts playing on that fighter,
+// we stop it and immediately start it again at a higher volume.
+// ---------------------------------------------------------------------------
+
+/// Sounds to boost and their volume (1.0 = normal).
+const BOOSTED: [(&str, f32); 2] = [
+    ("se_common_guardbreak", 2.5),
+    ("se_common_finishhit", 2.5),
+];
+
+const ENTRY_ID: i32 = 0x10000000; // FIGHTER_INSTANCE_WORK_ID_INT_ENTRY_ID
+const KIND_NANA: i32 = 0x4C; // FIGHTER_KIND_NANA (shares Popo's entry ID)
+
+/// Whether each boosted sound was already playing last frame, per fighter
+/// (8 entry IDs, plus 8 more for Nana).
+#[allow(clippy::declare_interior_mutable_const)]
+const NOT_PLAYING: AtomicBool = AtomicBool::new(false);
+static WAS_PLAYING: [[AtomicBool; 2]; 16] = [[NOT_PLAYING; 2]; 16];
+
+unsafe extern "C" fn boost_common_sounds(fighter: &mut L2CFighterCommon) {
+    let boma: *mut BattleObjectModuleAccessor =
+        sv_system::battle_object_module_accessor(fighter.lua_state_agent);
+    if boma.is_null() {
+        return;
+    }
+    let entry = WorkModule::get_int(boma, ENTRY_ID);
+    if !(0..8).contains(&entry) {
+        return;
+    }
+    let slot = entry as usize + if utility::get_kind(&mut *boma) == KIND_NANA { 8 } else { 0 };
+    let Some(state) = WAS_PLAYING.get(slot) else { return };
+
+    for (i, (name, volume)) in BOOSTED.iter().enumerate() {
+        let hash = Hash40::new(name);
+        let playing = SoundModule::is_playing(boma, hash);
+        let was = state[i].load(Ordering::Relaxed);
+        if playing && !was {
+            SoundModule::stop_se(boma, hash, 0);
+            let handle = SoundModule::play_se(boma, hash, true, false, false, false, enSEType(0));
+            if handle != 0 {
+                SoundModule::set_se_vol(boma, handle as i32, *volume, 0);
+            }
+            state[i].store(true, Ordering::Relaxed);
+        } else if !playing && was {
+            state[i].store(false, Ordering::Relaxed);
+        }
+    }
+}
+
 #[skyline::main(name = "sleep_sound_full")]
 pub fn main() {
     for name in FIGHTERS {
         Agent::new(*name)
             .acmd("sound_sleepstart", sound_sleepstart, Priority::Low)
+            // Main runs on normal frames, ExecStop during hitlag (the final
+            // hit starts its sound while everyone is frozen).
+            .on_line(Main, boost_common_sounds)
+            .on_line(ExecStop, boost_common_sounds)
             .install();
     }
     Agent::new("pickel")
         .acmd("sound_sleepstart", sound_sleepstart_pickel, Priority::Low)
+        .on_line(Main, boost_common_sounds)
+        .on_line(ExecStop, boost_common_sounds)
         .install();
 }
