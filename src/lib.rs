@@ -133,8 +133,8 @@ const KIND_NANA: i32 = 0x4C; // FIGHTER_KIND_NANA (shares Popo's entry ID)
 /// Whether each boosted sound was already playing last frame, per fighter
 /// (8 entry IDs, plus 8 more for Nana).
 #[allow(clippy::declare_interior_mutable_const)]
-const NOT_PLAYING: AtomicBool = AtomicBool::new(false);
-static WAS_PLAYING: [[AtomicBool; 2]; 16] = [[NOT_PLAYING; 2]; 16];
+const NOT_PLAYING: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+static WAS_PLAYING: [[AtomicBool; 2]; 16] = [NOT_PLAYING; 16];
 
 unsafe extern "C" fn boost_common_sounds(fighter: &mut L2CFighterCommon) {
     let boma: *mut BattleObjectModuleAccessor =
